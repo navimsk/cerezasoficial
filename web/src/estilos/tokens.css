@@ -1,0 +1,123 @@
+/* Tokens de diseño — ver DESIGN.md. Claro por defecto; oscuro por sistema o por data-theme. */
+:root {
+  color-scheme: light;
+  --fondo: #f3f1ec;
+  --superficie: #fbfaf7;
+  --superficie-2: #ece9e3;
+  --tinta: #1a1714;
+  --tinta-2: #55504a;
+  --tinta-3: #6b655e;
+  --linea: #dcd8d0;
+  --linea-fuerte: #bdb8ae;
+
+  --cereza: #9e1b34;
+  --cereza-texto: #9e1b34;
+  --cereza-lavado: rgba(158, 27, 52, 0.10);
+  --acero: #2b6a9e;
+  --acero-lavado: rgba(43, 106, 158, 0.10);
+  --gris-serie: #a39e95;
+
+  --ok: #1d7a3a;
+  --atasco: #9a5b00;
+  --sin-conexion: #b3381f;
+  --ok-fondo: rgba(29, 122, 58, 0.10);
+  --atasco-fondo: rgba(154, 91, 0, 0.12);
+  --sin-conexion-fondo: rgba(179, 56, 31, 0.10);
+
+  --seq-0: #eef1f4; --seq-1: #cfdbe6; --seq-2: #a7c0d6; --seq-3: #7aa1c2;
+  --seq-4: #4f80ab; --seq-5: #2b6a9e; --seq-6: #1b4a73;
+
+  --sombra-menu: 0 1px 2px rgba(26, 23, 20, 0.08), 0 4px 12px rgba(26, 23, 20, 0.06);
+
+  /* tipografía */
+  --f-texto: 'Barlow', 'Segoe UI', system-ui, sans-serif;
+  --f-cifra: 'Barlow Semi Condensed', 'Barlow', 'Segoe UI', system-ui, sans-serif;
+  --t-hero: clamp(88px, 26vw, 132px);
+  --t-xl: 40px;
+  --t-l: 28px;
+  --t-m: 20px;
+  --t-base: 16px;
+  --t-s: 14px;
+  --t-xs: 12px;
+
+  /* espacio */
+  --e-1: 4px; --e-2: 8px; --e-3: 12px; --e-4: 16px;
+  --e-5: 24px; --e-6: 32px; --e-7: 48px; --e-8: 64px;
+  --margen: 16px;
+
+  --r-control: 2px;
+  --r-panel: 4px;
+
+  --dur-rapida: 120ms;
+  --dur-cifra: 180ms;
+  --dur-entrada: 200ms;
+}
+
+@media (min-width: 900px) {
+  :root {
+    --t-hero: clamp(120px, 11vw, 176px);
+    --t-xl: 48px;
+    --t-l: 32px;
+    --margen: 32px;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --fondo: #0f0e0d;
+    --superficie: #191816;
+    --superficie-2: #23211e;
+    --tinta: #eeebe5;
+    --tinta-2: #bdb7ae;
+    --tinta-3: #8f8981;
+    --linea: #2e2c28;
+    --linea-fuerte: #45423c;
+    --cereza: #e5566c;
+    --cereza-texto: #ef6b7f;
+    --cereza-lavado: rgba(229, 86, 108, 0.14);
+    --acero: #5a9bd3;
+    --acero-lavado: rgba(90, 155, 211, 0.14);
+    --gris-serie: #5e5a54;
+    --ok: #4cc06b;
+    --atasco: #f0a83c;
+    --sin-conexion: #f07a5f;
+    --ok-fondo: rgba(76, 192, 107, 0.12);
+    --atasco-fondo: rgba(240, 168, 60, 0.12);
+    --sin-conexion-fondo: rgba(240, 122, 95, 0.12);
+    --seq-0: #1d2126; --seq-1: #1f3448; --seq-2: #23496b; --seq-3: #2a6190;
+    --seq-4: #3b7db3; --seq-5: #5a9bd3; --seq-6: #93c0e6;
+    --sombra-menu: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --fondo: #0f0e0d;
+  --superficie: #191816;
+  --superficie-2: #23211e;
+  --tinta: #eeebe5;
+  --tinta-2: #bdb7ae;
+  --tinta-3: #8f8981;
+  --linea: #2e2c28;
+  --linea-fuerte: #45423c;
+  --cereza: #e5566c;
+  --cereza-texto: #ef6b7f;
+  --cereza-lavado: rgba(229, 86, 108, 0.14);
+  --acero: #5a9bd3;
+  --acero-lavado: rgba(90, 155, 211, 0.14);
+  --gris-serie: #5e5a54;
+  --ok: #4cc06b;
+  --atasco: #f0a83c;
+  --sin-conexion: #f07a5f;
+  --ok-fondo: rgba(76, 192, 107, 0.12);
+  --atasco-fondo: rgba(240, 168, 60, 0.12);
+  --sin-conexion-fondo: rgba(240, 122, 95, 0.12);
+  --seq-0: #1d2126; --seq-1: #1f3448; --seq-2: #23496b; --seq-3: #2a6190;
+  --seq-4: #3b7db3; --seq-5: #5a9bd3; --seq-6: #93c0e6;
+  --sombra-menu: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-rapida: 0ms; --dur-cifra: 0ms; --dur-entrada: 0ms; }
+}

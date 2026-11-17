@@ -1,0 +1,203 @@
+// Prueba las migraciones en un Postgres real (PGlite, en memoria) sin Docker.
+//   cd supabase/pruebas && npm install && npm test
+// Simula lo mínimo de Supabase (roles anon/authenticated/service_role, auth.jwt(), auth.users),
+// aplica las migraciones DOS veces (idempotencia), carga datos del simulador por la misma
+// función que usa la Edge Function "ingesta" y verifica seguridad, agregados y RPC.
+import { PGlite } from '@electric-sql/pglite'
+import { readdirSync, readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { simularDia } from '../../web/src/demo/simulador.ts'
+import { inicioDia, sumarDias } from '../../web/src/lib/tiempo.ts'
+
+const DIR = new URL('../migrations/', import.meta.url)
+const db = new PGlite()
+let fallas = 0
+const ok = (cond, msg) => { console.log(`${cond ? '  ✔' : '  ✘'} ${msg}`); if (!cond) fallas++ }
+
+await db.exec(`
+  create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
+  grant usage on schema public to anon, authenticated, service_role;
+  create schema auth;
+  create table auth.users (id uuid primary key, email text);
+  create function auth.jwt() returns jsonb language sql stable as
+    $$ select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $$;
+  create function auth.uid() returns uuid language sql stable as $$ select nullif(auth.jwt() ->> 'sub', '')::uuid $$;
+  grant usage on schema auth to anon, authenticated, service_role;
+  grant select on auth.users to service_role;
+  create publication supabase_realtime;
+  create schema extensions;
+  alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+`)
+
+const archivos = readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
+console.log('Migraciones:', archivos.join(', '))
+for (const vuelta of [1, 2]) {
+  for (const f of archivos) {
+    try { await db.exec(readFileSync(new URL(f, DIR), 'utf8')) }
+    catch (e) { ok(false, `vuelta ${vuelta} ${f}: ${e.message}`); process.exit(1) }
+  }
+  ok(true, `migraciones aplicadas (vuelta ${vuelta})`)
+}
+
+// ---------- datos ----------
+const token = 'token-de-prueba-0123456789abcdef'
+const hash = createHash('sha256').update(token).digest('hex')
+await db.query(`select public.registrar_token_equipo('linea-1', $1)`, [hash])
+
+const ahora = Date.now()
+const hoy = inicioDia(ahora)
+let seq = 1, todos = []
+const DIAS = 16
+for (let i = DIAS; i >= 0; i--) {
+  const d = i === 0 ? hoy : inicioDia(sumarDias(hoy + 12 * 3600e3, -i))
+  const r = simularDia({ equipoId: 'linea-1', semilla: 7, diaInicio: d, indiceTemporada: 0.5, seqInicio: seq, forzarActivoEn: i === 0 ? ahora : undefined })
+  seq = r.seqFin
+  todos.push(...r.eventos.filter(e => e.ts <= ahora))
+}
+const json = e => ({ ...e, ts: new Date(e.ts).toISOString() })
+
+async function comoRol(rol, claims, fn) {
+  await db.exec('begin')
+  await db.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify(claims ?? {})])
+  await db.exec(`set local role ${rol}`)
+  try { return await fn() } finally { await db.exec('rollback') }
+}
+async function comoRolCommit(rol, fn) {
+  await db.exec('begin'); await db.exec(`set local role ${rol}`)
+  try { const r = await fn(); await db.exec('commit'); return r } catch (e) { await db.exec('rollback'); throw e }
+}
+
+console.log(`Cargando ${todos.length} eventos (${DIAS + 1} días) por ingestar_eventos…`)
+const t0 = Date.now()
+let insertados = 0
+for (let i = 0; i < todos.length; i += 500) {
+  const lote = todos.slice(i, i + 500).map(json)
+  const r = await comoRolCommit('service_role', () => db.query('select * from public.ingestar_eventos($1, $2)', [hash, JSON.stringify(lote)]))
+  insertados += r.rows[0].insertados
+}
+console.log(`  (${((Date.now() - t0) / 1000).toFixed(1)} s)`)
+ok(insertados === todos.length, `insertados ${insertados} de ${todos.length}`)
+
+// reenvío del mismo lote: no duplica
+const relote = todos.slice(1000, 1500).map(json)
+const re = await comoRolCommit('service_role', () => db.query('select * from public.ingestar_eventos($1, $2)', [hash, JSON.stringify(relote)]))
+ok(re.rows[0].insertados === 0, 'reenviar un lote no inserta duplicados')
+
+// token malo
+try {
+  await comoRolCommit('service_role', () => db.query('select * from public.ingestar_eventos($1, $2)', ['0'.repeat(64), '[]']))
+  ok(false, 'token inválido debe fallar')
+} catch (e) { ok(e.message.includes('token_invalido'), 'token inválido es rechazado') }
+
+// ---------- agregados ----------
+const sumaN = todos.reduce((a, e) => a + e.n, 0)
+const agg = (await db.query(`select (select sum(cajas) from agg_minuto) m, (select sum(cajas) from agg_hora) h, (select sum(cajas) from agg_dia) d,
+  (select sum(n) from eventos) e, (select sum(atascos) from agg_dia) a, (select count(*) from eventos where tipo='atasco_inicio') ae`)).rows[0]
+ok(Number(agg.e) === sumaN && Number(agg.m) === sumaN && Number(agg.h) === sumaN && Number(agg.d) === sumaN,
+  `conteo = suma de n en eventos y en los 3 agregados (${sumaN})`)
+ok(Number(agg.a) === Number(agg.ae), `atascos agregados = eventos atasco_inicio (${agg.a})`)
+
+// recalcular desde cero da lo mismo
+await db.query('select public.recalcular_agregados()')
+const agg2 = (await db.query('select sum(cajas) d from agg_dia')).rows[0]
+ok(Number(agg2.d) === sumaN, 'recalcular_agregados reproduce el total')
+
+// ---------- seguridad ----------
+const anonLee = await comoRol('anon', {}, () => db.query('select count(*)::int c from eventos'))
+ok(anonLee.rows[0].c === 0, 'anon NO lee eventos')
+const anonAgg = await comoRol('anon', {}, async () => { try { return (await db.query('select count(*)::int c from agg_dia')).rows[0].c } catch { return 0 } })
+ok(anonAgg === 0, 'anon NO lee agregados')
+const anonIns = await comoRol('anon', {}, async () => {
+  try { await db.query(`insert into eventos (equipo_id, seq, tipo, n) values ('linea-1', 99999999, 'caja', 1)`); return true } catch { return false }
+})
+ok(anonIns, 'anon SÍ inserta mientras permitir_insert_anon = true (compatibilidad firmware v2)')
+const anonInsOtro = await comoRol('anon', {}, async () => {
+  try { await db.query(`insert into eventos (equipo_id, seq, tipo, n) values ('equipo-falso', 1, 'caja', 1)`); return true } catch { return false }
+})
+ok(!anonInsOtro, 'anon NO inserta para un equipo que no existe')
+await db.query(`update ajustes_sistema set valor = 'false' where clave = 'permitir_insert_anon'`)
+const anonIns2 = await comoRol('anon', {}, async () => {
+  try { await db.query(`insert into eventos (equipo_id, seq, tipo, n) values ('linea-1', 99999998, 'caja', 1)`); return true } catch { return false }
+})
+ok(!anonIns2, 'anon NO inserta con permitir_insert_anon = false')
+await db.query(`update ajustes_sistema set valor = 'true' where clave = 'permitir_insert_anon'`)
+
+const anonToken = await comoRol('anon', {}, async () => { try { await db.query(`select token_hash from equipos`); return true } catch { return false } })
+ok(!anonToken, 'anon no puede leer token_hash')
+
+const uid = '11111111-1111-1111-1111-111111111111'
+await db.query(`insert into auth.users (id, email) values ($1, 'jefa@packing.cl')`, [uid])
+const claims = { sub: uid, email: 'jefa@packing.cl', role: 'authenticated' }
+const noAut = await comoRol('authenticated', claims, () => db.query('select count(*)::int c from eventos'))
+ok(noAut.rows[0].c === 0, 'usuario autenticado pero NO autorizado no lee eventos')
+const tokAuth = await comoRol('authenticated', claims, async () => { try { await db.query(`select token_hash from equipos`); return true } catch { return false } })
+ok(!tokAuth, 'usuario autenticado no puede leer token_hash')
+
+await db.query(`insert into usuarios_autorizados (email, rol) values ('jefa@packing.cl', 'jefatura')`)
+const aut = await comoRol('authenticated', claims, () => db.query('select count(*)::int c from eventos'))
+ok(aut.rows[0].c > 0, 'usuario autorizado lee eventos')
+const perfil = await comoRol('authenticated', claims, () => db.query('select * from mi_perfil()'))
+ok(perfil.rows[0].rol === 'jefatura', 'mi_perfil() devuelve el rol')
+const noAdmin = await comoRol('authenticated', claims, async () => {
+  try { await db.query(`insert into usuarios_autorizados (email) values ('otro@x.cl')`); return true } catch { return false }
+})
+ok(!noAdmin, 'jefatura NO puede agregar usuarios')
+
+// ---------- RPC ----------
+const enJs = (desde, hasta) => todos.filter(e => e.ts >= desde && e.ts < hasta).reduce((a, e) => a + e.n, 0)
+const rv = await comoRol('authenticated', claims, () => db.query(`select * from resumen_vivo('linea-1')`))
+const r = rv.rows[0]
+console.log('  resumen_vivo:', { hoy: r.hoy, ayer: r.ayer_misma_hora, sem: r.semana_anterior_misma_hora, ritmo10: r.ritmo10, habitual: r.ritmo_habitual, atascos: r.atascos_hoy, en_atasco: r.en_atasco })
+ok(Number(r.hoy) === enJs(hoy, ahora + 1), `resumen_vivo.hoy coincide con los eventos (${r.hoy})`)
+const ayerFin = sumarDias(ahora, -1)
+ok(Math.abs(Number(r.ayer_misma_hora) - enJs(inicioDia(ayerFin), ayerFin)) <= 40, 'ayer a la misma hora ≈ eventos (resolución de 1 min)')
+
+const s = await comoRol('authenticated', claims, () => db.query(
+  `select * from serie('linea-1', $1, $2, 'day')`, [new Date(sumarDias(hoy, -14)).toISOString(), new Date(ahora).toISOString()]))
+ok(s.rows.length === 15, `serie por día: 15 puntos con ceros (${s.rows.length})`)
+const sh = await comoRol('authenticated', claims, () => db.query(
+  `select * from serie('linea-1', $1, $2, 'hour')`, [new Date(hoy).toISOString(), new Date(hoy + 86400e3).toISOString()]))
+ok(sh.rows.length === 24 && sh.rows.reduce((a, x) => a + Number(x.cajas), 0) === Number(r.hoy), 'serie por hora de hoy: 24 puntos que suman lo de hoy')
+const sw = await comoRol('authenticated', claims, () => db.query(
+  `select * from serie('linea-1', $1, $2, 'week')`, [new Date(sumarDias(hoy, -16)).toISOString(), new Date(ahora).toISOString()]))
+ok(sw.rows.length >= 3, `serie por semana (${sw.rows.length} semanas)`)
+
+const sal = await comoRol('authenticated', claims, () => db.query(`select * from salud_equipos()`))
+console.log('  salud:', sal.rows[0])
+ok(sal.rows.length === 1 && sal.rows[0].rssi !== null, 'salud_equipos devuelve el último heartbeat')
+
+const at = await comoRol('authenticated', claims, () => db.query(
+  `select * from atascos_rango('linea-1', $1, $2)`, [new Date(sumarDias(hoy, -16)).toISOString(), new Date(ahora).toISOString()]))
+ok(at.rows.length === Number(agg.ae), `atascos_rango lista todos los atascos (${at.rows.length})`)
+
+const dp = await comoRol('authenticated', claims, () => db.query(`select * from datos_proyeccion('linea-1', 30)`))
+ok(dp.rows.length > 100, `datos_proyeccion devuelve franjas de 15 min (${dp.rows.length})`)
+
+const pd = await comoRol('authenticated', claims, () => db.query(`select primer_dato('linea-1') p`))
+ok(pd.rows[0].p !== null, 'primer_dato')
+
+// ---------- avisos ----------
+const al = await comoRolCommit('service_role', () => db.query('select * from alertas_pendientes()'))
+console.log('  alertas:', al.rows.map(x => `${x.tipo}: ${x.cuerpo}`))
+ok(true, 'alertas_pendientes se ejecuta')
+// forzar un atasco reciente y comprobar que genera aviso una sola vez
+const ultSeq = (await db.query(`select max(seq)::bigint m from eventos`)).rows[0].m
+await comoRolCommit('service_role', () => db.query('select * from public.ingestar_eventos($1, $2)', [hash, JSON.stringify([
+  { seq: Number(ultSeq) + 1, tipo: 'atasco_inicio', n: 0, ts: new Date().toISOString() }])]))
+const al1 = await comoRolCommit('service_role', () => db.query('select * from alertas_pendientes()'))
+ok(al1.rows.some(x => x.tipo === 'atasco'), `atasco reciente genera aviso: "${al1.rows.find(x => x.tipo === 'atasco')?.cuerpo}"`)
+await db.query(`insert into notificaciones_despachadas (notificacion_id) select id from notificaciones_enviadas on conflict do nothing`)
+const al2 = await comoRolCommit('service_role', () => db.query('select * from alertas_pendientes()'))
+ok(al2.rows.length === 0, 'segunda llamada no repite avisos ya despachados')
+const rv2 = await comoRol('authenticated', claims, () => db.query(`select en_atasco from resumen_vivo('linea-1')`))
+ok(rv2.rows[0].en_atasco === true, 'resumen_vivo marca en_atasco')
+const dest = await comoRolCommit('service_role', () => db.query(`select * from destinatarios_push('atasco')`))
+ok(dest.rows.length === 0, 'sin suscripciones no hay destinatarios')
+
+const noServ = await comoRol('authenticated', claims, async () => { try { await db.query('select * from alertas_pendientes()'); return true } catch { return false } })
+ok(!noServ, 'un usuario no puede ejecutar alertas_pendientes')
+
+console.log(fallas ? `\n${fallas} PRUEBA(S) FALLARON` : '\nTodas las pruebas pasan.')
+process.exit(fallas ? 1 : 0)

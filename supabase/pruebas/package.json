@@ -1,0 +1,11 @@
+{
+  "name": "pruebas-migraciones",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node probar_validacion.mjs && node probar_migraciones.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16"
+  }
+}
