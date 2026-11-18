@@ -175,6 +175,20 @@ public:
     }
   }
 
+  // Cambia la configuración en marcha (desde la app). Llamar desde la MISMA tarea que paso().
+  //  largoMm: largo de la caja en el sentido de avance (se ignora si está fuera de 50–2000 mm)
+  //  velFijaMmS > 0: usa esa velocidad desde ya y reinicia el aprendizaje desde ese valor
+  //  aprender: seguir ajustando la velocidad con las cajas aisladas
+  void ajustar(float largoMm, float velFijaMmS, bool aprender) {
+    if (largoMm >= 50 && largoMm <= 2000) cfg.largoCajaMm = largoMm;
+    cfg.aprender = aprender;
+    if (velFijaMmS > 0 && !cfg.usarEncoder) {
+      if (velFijaMmS < cfg.velMinMmS) velFijaMmS = cfg.velMinMmS;
+      if (velFijaMmS > cfg.velMaxMmS) velFijaMmS = cfg.velMaxMmS;
+      velMmS = velFijaMmS; iMuestra = 0; nMuestras = 0;
+    }
+  }
+
   // --- consultas para el heartbeat / pantalla ---
   int32_t  totalCajas()   const { return total; }
   uint32_t pulsosFiltrados() const { return filtrados; }

@@ -30,7 +30,15 @@ export interface ExtraHeartbeat {
   perdidos_cola?: number
 }
 
-export interface Equipo { id: string; nombre: string; largo_caja_mm: number }
+export interface Equipo {
+  id: string; nombre: string; largo_caja_mm: number
+  /** Velocidad de la cinta fijada desde la app (null = el equipo usa la que aprende). */
+  vel_cinta_mm_s?: number | null
+  /** El equipo sigue ajustando la velocidad con las cajas sueltas. */
+  aprender_vel?: boolean
+}
+
+export interface ConfigEquipo { largo_caja_mm: number; vel_cinta_mm_s: number | null; aprender_vel: boolean }
 
 /** Un intervalo agregado (minuto, hora, día…). */
 export interface Punto {
@@ -91,6 +99,8 @@ export type Escuchar = (e: Evento) => void
 export interface FuenteDatos {
   readonly modo: 'demo' | 'supabase'
   equipos(): Promise<Equipo[]>
+  /** Solo admin: largo de caja y velocidad de la cinta. El equipo lo recibe en su próximo envío. */
+  guardarConfigEquipo(equipoId: string, c: ConfigEquipo): Promise<void>
   resumenVivo(equipoId: string): Promise<ResumenVivo>
   serie(equipoId: string, desde: number, hasta: number, paso: Paso): Promise<Punto[]>
   eventos(equipoId: string, desde: number, hasta: number, limite?: number): Promise<Evento[]>

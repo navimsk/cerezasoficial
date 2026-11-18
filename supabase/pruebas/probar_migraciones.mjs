@@ -199,5 +199,25 @@ ok(dest.rows.length === 0, 'sin suscripciones no hay destinatarios')
 const noServ = await comoRol('authenticated', claims, async () => { try { await db.query('select * from alertas_pendientes()'); return true } catch { return false } })
 ok(!noServ, 'un usuario no puede ejecutar alertas_pendientes')
 
+// ---------- 0007 · configuración del equipo desde la app ----------
+console.log('\nConfiguración del equipo')
+const cfg0 = (await db.query(`select largo_caja_mm, vel_cinta_mm_s, aprender_vel, config_actualizada from equipos where id = 'linea-1'`)).rows[0]
+ok(cfg0.largo_caja_mm === 505 && Math.abs(cfg0.vel_cinta_mm_s - 292.3) < 0.05, `línea 1 con medidas oficiales (${cfg0.largo_caja_mm} mm, ${cfg0.vel_cinta_mm_s} mm/s)`)
+const jefaEdita = await comoRol('authenticated', claims, async () =>
+  (await db.query(`update equipos set vel_cinta_mm_s = 100 where id = 'linea-1' returning id`)).rows.length)
+ok(jefaEdita === 0, 'jefatura no puede cambiar la velocidad')
+await db.query(`insert into usuarios_autorizados (email, rol) values ('admin@packing.cl', 'admin')`)
+const claimsAdmin = { sub: uid, email: 'admin@packing.cl', role: 'authenticated' }
+const adminEdita = await comoRol('authenticated', claimsAdmin, async () => {
+  const r = await db.query(`update equipos set vel_cinta_mm_s = 250, aprender_vel = false where id = 'linea-1' returning vel_cinta_mm_s, aprender_vel, config_actualizada`)
+  return r.rows[0]
+})
+ok(adminEdita?.vel_cinta_mm_s === 250 && adminEdita.aprender_vel === false, 'admin puede cambiar velocidad y aprendizaje')
+ok(adminEdita && new Date(adminEdita.config_actualizada) >= new Date(cfg0.config_actualizada), 'editar la configuración actualiza su versión')
+const tokenOculto = await comoRol('authenticated', claimsAdmin, async () => { try { await db.query(`select token_hash from equipos`); return false } catch { return true } })
+ok(tokenOculto, 'token_hash sigue oculto para usuarios')
+const fueraRango = await (async () => { try { await db.query(`update equipos set vel_cinta_mm_s = 5000 where id = 'linea-1'`); return false } catch { return true } })()
+ok(fueraRango, 'velocidad fuera de rango se rechaza')
+
 console.log(fallas ? `\n${fallas} PRUEBA(S) FALLARON` : '\nTodas las pruebas pasan.')
 process.exit(fallas ? 1 : 0)

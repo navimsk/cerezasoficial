@@ -438,3 +438,9 @@ svg { display: block; }
 .interruptor input:focus-visible + .interruptor__pista { outline: 2px solid var(--tinta); outline-offset: 2px; }
 .interruptor__texto { display: flex; flex-direction: column; }
 .interruptor__texto b { font-weight: 600; }
+
+/* Equipos · configuración del conteo */
+.config-conteo { border-top: 1px solid var(--linea); padding: var(--e-4); display: grid; gap: var(--e-3); }
+.config-conteo__campos { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: var(--e-3); grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); align-items: start; }
+.config-conteo__campos .interruptor { grid-column: 1 / -1; }
+.config-conteo input[aria-invalid='true'] { border-color: var(--sin-conexion); }

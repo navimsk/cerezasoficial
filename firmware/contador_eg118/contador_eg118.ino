@@ -53,8 +53,12 @@ conteo::Config crearConfig() {
   conteo::Config c;
   c.bloqueoMinMs  = 100;    // ignorar bloqueos más cortos
   c.huecoMinMs    = 30;     // hueco mínimo que separa dos cajas
-  c.largoCajaMm   = 235;    // largo de la caja en el sentido de avance
-  c.velInicialMmS = 2000;    // velocidad aproximada de la cinta (medirla: se ajusta sola después)
+  // Largo y velocidad: estos son solo los valores al encender. Se cambian desde la app
+  // (pantalla Equipos) y el equipo los recibe en su próximo envío, sin reprogramarlo.
+  c.largoCajaMm   = 505;    // caja 50,5 × 27,5 × 20 cm, avanza a lo largo
+  c.velInicialMmS = 292;    // 17,54 m/min; se ajusta sola con las cajas sueltas
+  c.velMinMmS     = 30;     // 1,8 m/min: mediciones más lentas se descartan
+  c.velMaxMmS     = 1500;   // 90 m/min
   c.maxPegadas    = 4;      // más cajas pegadas seguidas = atasco / cinta detenida
   c.usarEncoder   = false;  // true si se instala sensor de movimiento en el rodillo (ver USAR_AI_ENCODER)
   c.mmPorPulso    = 50;
@@ -122,6 +126,44 @@ void alEvento(const conteo::Evento& e, void*) {
   if (e.tipo == conteo::EV_ATASCO_FIN)    enAtasco = false;
 }
 
+// ---------- Configuración remota (la escribe loop(), la aplica la tarea de conteo) ----------
+volatile bool cfgPendiente = false;
+volatile float cfgLargoMm = 0, cfgVelMmS = 0;
+volatile bool cfgAprender = true;
+int64_t cfgVersion = -1;
+
+// Busca "clave": número en un JSON simple. Devuelve false si no está.
+bool numeroJson(const String& s, const char* clave, double& out) {
+  String k = String("\"") + clave + "\":";
+  int i = s.indexOf(k);
+  if (i < 0) return false;
+  i += k.length();
+  while (i < (int)s.length() && s[i] == ' ') i++;
+  if (s.startsWith("true", i)) { out = 1; return true; }
+  if (s.startsWith("false", i)) { out = 0; return true; }
+  if (s.startsWith("null", i)) { out = 0; return true; }
+  out = atof(s.c_str() + i);
+  return true;
+}
+
+// Lee el bloque "config" de la respuesta de ingesta y lo deja listo para la tarea de conteo.
+void leerConfigRemota(const String& resp) {
+  int c = resp.indexOf("\"config\":{");
+  if (c < 0) return;
+  String cfg = resp.substring(c, resp.indexOf('}', c) + 1);
+  double version, largo, vel, aprender;
+  if (!numeroJson(cfg, "version", version) || (int64_t)version == cfgVersion) return;
+  if (!numeroJson(cfg, "largo_caja_mm", largo)) largo = 0;
+  if (!numeroJson(cfg, "vel_cinta_mm_s", vel)) vel = 0;
+  if (!numeroJson(cfg, "aprender_vel", aprender)) aprender = 1;
+  cfgLargoMm = largo; cfgVelMmS = vel; cfgAprender = aprender != 0;
+  cfgPendiente = true;
+  cfgVersion = (int64_t)version;
+  Serial.printf("Config desde la app: caja %.0f mm · velocidad %s · aprender %s\n", largo,
+                vel > 0 ? (String(vel * 60 / 1000, 2) + " m/min").c_str() : "la del equipo",
+                aprender != 0 ? "sí" : "no");
+}
+
 // ---------- Tarea de conteo: 1 ms ----------
 void tareaConteo(void*) {
   TickType_t sig = xTaskGetTickCount();
@@ -142,6 +184,10 @@ void tareaConteo(void*) {
       int a = analogRead(PIN_AI);
       if (!aiAlto && a > AI_UMBRAL_ALTO) { aiAlto = true; pulsos = 1; }
       else if (aiAlto && a < AI_UMBRAL_BAJO) aiAlto = false;
+    }
+    if (cfgPendiente) {                                   // configuración recibida desde la app
+      contador.ajustar(cfgLargoMm, cfgVelMmS, cfgAprender);
+      cfgPendiente = false;
     }
     for (uint32_t i = 0; i < pasos; i++) contador.paso(haz, i == 0 ? pulsos : 0);
 
@@ -246,6 +292,7 @@ int enviarLote() {
   if (usarToken()) {
     String resp = http.getString();
     if (resp.indexOf("\"rechazados\":[]") < 0) Serial.printf("Supabase: %s\n", resp.substring(0, 200).c_str());
+    leerConfigRemota(resp);
   }
   http.end();
   pIni = (pIni + k) % pCap; pCant -= k;

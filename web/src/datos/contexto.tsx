@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import type { Equipo, FuenteDatos } from './tipos'
 import { FuenteDemo } from '../demo/fuenteDemo'
@@ -14,6 +14,8 @@ interface Ctx {
   equipo: Equipo | null
   equipos: Equipo[]
   setEquipoId: (id: string) => void
+  /** Vuelve a leer la lista de equipos (tras editar su configuración). */
+  recargarEquipos: () => Promise<void>
   /** Último evento recibido (de cualquier tipo), para el indicador en vivo. */
   ultimoContacto: number | null
   perfil: Perfil | null
@@ -68,9 +70,11 @@ function ConFuente({ fuente: tipo, perfil, sesion, children }: { fuente: 'supaba
   const [equipoId, setEquipoId] = useState<string>(() => leer('cajas.equipo') ?? '')
   const [ultimoContacto, setUltimo] = useState<number | null>(() => cacheLeer<number>('ultimoContacto')?.v ?? null)
 
-  useEffect(() => {
-    fuente.equipos().then(e => { setEquipos(e); cacheGuardar('equipos', e) }).catch(() => { /* sin red: se usa la caché */ })
+  const recargarEquipos = useCallback(async () => {
+    const e = await fuente.equipos()
+    setEquipos(e); cacheGuardar('equipos', e)
   }, [fuente])
+  useEffect(() => { recargarEquipos().catch(() => { /* sin red: se usa la caché */ }) }, [recargarEquipos])
   const equipo = equipos.find(e => e.id === equipoId) ?? equipos[0] ?? null
 
   useEffect(() => {
@@ -85,9 +89,9 @@ function ConFuente({ fuente: tipo, perfil, sesion, children }: { fuente: 'supaba
   }, [fuente, equipo])
 
   const valor = useMemo<Ctx>(() => ({
-    fuente, equipo, equipos, ultimoContacto, perfil, sesion,
+    fuente, equipo, equipos, ultimoContacto, perfil, sesion, recargarEquipos,
     setEquipoId: (id: string) => { setEquipoId(id); guardar('cajas.equipo', id) },
-  }), [fuente, equipo, equipos, ultimoContacto, perfil, sesion])
+  }), [fuente, equipo, equipos, ultimoContacto, perfil, sesion, recargarEquipos])
 
   return <Contexto.Provider value={valor}>{children}</Contexto.Provider>
 }

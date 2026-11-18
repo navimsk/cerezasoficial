@@ -1,6 +1,6 @@
 // Fuente de datos real: RPC y tablas de Supabase (ver supabase/migrations).
 import type { RealtimeChannel } from '@supabase/supabase-js'
-import type { Atasco, Equipo, Escuchar, Evento, FranjaProyeccion, FuenteDatos, Punto, ResumenVivo, SaludEquipo } from './tipos'
+import type { Atasco, ConfigEquipo, Equipo, Escuchar, Evento, FranjaProyeccion, FuenteDatos, Punto, ResumenVivo, SaludEquipo } from './tipos'
 import { supabase } from '../lib/supabase'
 import { DIA, HORA, MIN, type Paso } from '../lib/tiempo'
 
@@ -35,9 +35,15 @@ export class FuenteSupabase implements FuenteDatos {
   private sb = supabase()
 
   async equipos(): Promise<Equipo[]> {
-    const { data, error } = await this.sb.from('equipos').select('id, nombre, largo_caja_mm').eq('activo', true).order('id')
+    const { data, error } = await this.sb.from('equipos').select('id, nombre, largo_caja_mm, vel_cinta_mm_s, aprender_vel').eq('activo', true).order('id')
     if (error) throw new Error(error.message)
-    return (data ?? []).map(e => ({ id: e.id, nombre: e.nombre || e.id, largo_caja_mm: e.largo_caja_mm }))
+    return (data ?? []).map(e => ({ id: e.id, nombre: e.nombre || e.id, largo_caja_mm: e.largo_caja_mm, vel_cinta_mm_s: e.vel_cinta_mm_s, aprender_vel: e.aprender_vel }))
+  }
+
+  async guardarConfigEquipo(equipoId: string, c: ConfigEquipo): Promise<void> {
+    const { data, error } = await this.sb.from('equipos').update(c).eq('id', equipoId).select('id')
+    if (error) throw new Error(error.message)
+    if (!data?.length) throw new Error('Sin permiso: solo un administrador puede cambiar la configuración.')
   }
 
   async resumenVivo(equipoId: string): Promise<ResumenVivo> {

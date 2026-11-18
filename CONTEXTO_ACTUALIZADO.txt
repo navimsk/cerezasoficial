@@ -1,0 +1,144 @@
+CONTEXTO ACTUALIZADO — CONTADOR DE CAJAS DE CEREZAS
+Fecha: 18-11-2026
+Repositorio: https://github.com/navimsk/cerezasoficial (rama main)
+
+Este archivo resume el estado actual del proyecto, para continuar el trabajo en otro chat.
+Responde siempre en español.
+
+======================================================================
+1. QUÉ ES
+======================================================================
+Contador automático de cajas para un packing de cerezas.
+Sensor retrorreflectivo Metaltex P18R  ->  ESP32 industrial USR-EG118  ->  Supabase  ->  app web PWA.
+No hay metas de producción: todo se compara con el propio historial.
+Regla de oro: el conteo de cajas = SUMA de la columna n de la tabla eventos (no la cantidad de filas).
+
+======================================================================
+2. CAMBIO IMPORTANTE: NUEVO PROYECTO SUPABASE
+======================================================================
+- Antes se usaba el proyecto personal de José (swqtfzxmlrludgkttspl). YA NO SE USA.
+- Ahora el proyecto es: https://apwycfqzxjekdqukexbb.supabase.co  (cuenta de Tomás, proyecto "contador-cajas").
+- Los datos antiguos del proyecto de José NO se migraron.
+- En el proyecto nuevo ya están aplicadas las 6 migraciones y desplegadas las Edge Functions
+  "ingesta" y "vigilar". El equipo "linea-1" existe y tiene su token registrado (solo el hash).
+- La función ingesta fue probada: acepta eventos, no duplica al reenviar, rechaza tokens falsos (401).
+- Usuarios creados en Auth: joseagaetec@gmail.com y jfuentes032005@gmail.com.
+  PENDIENTE confirmar que estén en la lista blanca (tabla usuarios_autorizados), con este SQL en el SQL Editor:
+    insert into usuarios_autorizados (email, rol) values
+      ('joseagaetec@gmail.com','admin'), ('jfuentes032005@gmail.com','admin')
+    on conflict (email) do update set activo = true, rol = excluded.rol;
+
+Nota CLI: la versión nueva de Supabase CLI necesita --remote (si no, busca Docker local):
+  npx supabase db push --remote
+  npx supabase db query --remote "select ..."
+
+======================================================================
+3. ESTRUCTURA DEL REPOSITORIO
+======================================================================
+firmware/contador_eg118/
+  contador_eg118.ino   firmware v3 (envía a la Edge Function "ingesta" con token propio del equipo)
+  conteo.h             algoritmo de conteo (máquina de estados, 1 muestra por ms)
+  secretos.example.h   plantilla de credenciales
+  secretos.h           credenciales reales (WiFi, URL, token). NO está en git; existe solo en el PC de Tomás.
+firmware/CAMBIOS_FIRMWARE.md   cambios v2 -> v3
+supabase/migrations/   6 migraciones SQL (esquema, seguridad/RLS, ingesta, agregados, RPC de la app, push)
+supabase/functions/    ingesta (recibe del ESP32) y vigilar (avisos push)
+supabase/todo_en_uno.sql   las 6 migraciones juntas, para pegar en el SQL Editor
+supabase/pruebas/      pruebas de migraciones con PGlite (sin Docker)
+web/                   app PWA: Vite + React + TypeScript + ECharts
+web/.env               URL + clave publishable de Supabase. NO está en git.
+scripts/token-equipo.mjs   genera token de equipo + SQL con su hash
+README.md              instalación, Supabase, Netlify, instalar la PWA, migrar a base local
+DESIGN.md              sistema de diseño de la app
+
+======================================================================
+4. CÓMO FUNCIONA EL FLUJO
+======================================================================
+Firmware (conteo.h):
+- Lee el sensor cada 1 ms. Estados: LIBRE, VALIDANDO, EN_CAJA, ATASCO.
+- Bloqueo >= bloqueoMinMs (100 ms) = caja (+1, tipo "caja"). Huecos < huecoMinMs (30 ms) no separan cajas.
+- Cajas pegadas: estima por avance de la cinta (velocidad x tiempo); +1 por cada largo de caja (tipo "caja_est").
+- Atasco: si el bloqueo supera maxPegadas (4) cajas, revierte las estimadas (evento "ajuste", n negativo),
+  emite atasco_inicio y deja de contar hasta atasco_fin.
+- Velocidad: se aprende sola con la MEDIANA de las últimas 7 cajas AISLADAS; empieza a usarla desde la 3.ª.
+  Solo acepta mediciones entre velMinMmS (100) y velMaxMmS (1500 mm/s). Se reinicia al apagar.
+Envío (.ino):
+- Cada evento lleva seq correlativo guardado en memoria permanente (no se repite tras reinicio).
+- Cola en RAM, lotes de hasta 25, POST a /functions/v1/ingesta con cabecera x-equipo-token.
+- (equipo_id, seq) es único en la base: reenviar nunca duplica.
+- Heartbeat cada 30 s. Hora por NTP (zona Chile).
+Supabase:
+- Tabla eventos (dato bruto) + agregados agg_minuto/agg_hora/agg_dia por trigger.
+- RPC para la app: resumen_vivo, serie, salud_equipos, atascos_rango, datos_proyeccion, primer_dato.
+- RLS: solo leen los correos en usuarios_autorizados.
+- pg_cron cada minuto -> función vigilar -> push (atasco, >2 min sin contacto, caída de ritmo). Push aún NO configurado (faltan claves VAPID).
+App:
+- Pantallas: En vivo (Realtime), Historial, Proyecciones, Exportar (Excel/CSV/SQL), Equipos, Ajustes.
+- Sin .env arranca en modo demo con datos simulados.
+- Correr local: cd web && npm run dev  ->  http://localhost:5173
+
+======================================================================
+5. CONFIGURACIÓN ACTUAL DEL CONTEO (en crearConfig() del .ino)
+======================================================================
+  bloqueoMinMs  = 100
+  huecoMinMs    = 30
+  largoCajaMm   = 235
+  velInicialMmS = 2000
+  maxPegadas    = 4
+  usarEncoder   = false
+Placa en Arduino: ESP32-WROOM-DA Module (fqbn esp32:esp32:esp32da), core esp32 3.3.12.
+
+======================================================================
+6. PROBLEMAS ABIERTOS (al 18-11-2026)
+======================================================================
+A) LOS EVENTOS NO LLEGAN A SUPABASE. El ESP32 cuenta bien (se ve en el monitor serie), pero la tabla
+   eventos tiene 0 filas. La URL y el token están verificados como correctos.
+   Causa más probable: el ESP32 nunca se conecta al WiFi (hotspot de iPhone). El firmware anterior no
+   avisaba nada si el WiFi nunca conectaba.
+   - Se agregó diagnóstico: al encender lista las redes visibles (marca "->" la configurada) y, sin
+     conexión, imprime cada 10 s el motivo (no encuentra la red / clave incorrecta) y eventos pendientes.
+   - Sospecha: el SSID está escrito "IPhone de José" (I mayúscula); los iPhone suelen llamarse
+     "iPhone de José" (i minúscula). Mayúsculas, tildes y espacios cuentan.
+   - En el iPhone: activar "Maximizar compatibilidad" (2,4 GHz) y dejar abierta la pantalla de Compartir Internet.
+   - SIGUIENTE PASO: subir el firmware nuevo, abrir monitor serie a 115200, presionar RESET y revisar
+     las primeras líneas (lista de redes y estado WiFi). Debe aparecer "WiFi: conectado ...".
+
+B) VELOCIDAD FUERA DE RANGO. Con velInicialMmS = 2000, si la cinta realmente va a ~2 m/s, todas las
+   mediciones se descartan (límite 1500) y nunca aprende. Solución: agregar en crearConfig()
+     c.velMaxMmS = 3000;
+   Además conviene medir la velocidad real de la cinta (cronometrar 1 metro).
+   Con 235 mm a 2000 mm/s una caja tapa el haz ~117 ms: bloqueoMinMs = 100 está al límite, NO subirlo.
+
+C) "EL SENSOR ES MUY SENSIBLE". Falta saber el síntoma exacto:
+   - Si cuenta cosas que no son cajas (manos, hojas): subir bloqueoMinMs (cuidado con B).
+   - Si una caja se cuenta como dos (calados/asas de la caja, rebotes): subir huecoMinMs (ej. 60–80)
+     y/o mover el haz a una altura donde la caja sea sólida.
+   - Hardware: alinear bien el reflector; ajustar sensibilidad si el modelo tiene tornillo.
+
+======================================================================
+7. CÓMO SUBIR EL FIRMWARE DESDE VS CODE (sin instalar nada extra)
+======================================================================
+En la terminal de VS Code (PowerShell), desde la carpeta del proyecto:
+  Set-Alias arduino "C:\Program Files\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe"
+  arduino board list
+  arduino compile --fqbn esp32:esp32:esp32da firmware/contador_eg118
+  arduino upload  --fqbn esp32:esp32:esp32da -p COM3 firmware/contador_eg118
+  arduino monitor -p COM3 --config baudrate=115200
+Si se queda en "Connecting....." mantener BOOT. Cerrar el monitor antes de volver a subir.
+Para compilar se necesita secretos.h (copiar secretos.example.h y completarlo).
+
+======================================================================
+8. REGLAS DE SEGURIDAD
+======================================================================
+- Nunca escribir ni subir la clave service_role / secret de Supabase.
+- El token del equipo y la clave del WiFi van solo en secretos.h (fuera de git).
+- La app usa solo la clave publishable/anon, en web/.env (fuera de git).
+
+======================================================================
+9. PENDIENTES DESPUÉS DE RESOLVER EL ENVÍO
+======================================================================
+- Autorizar usuarios (SQL de la sección 2) y probar login en la app.
+- Ajustar velMaxMmS / sensibilidad con datos reales.
+- Cuando todo envíe por token: update ajustes_sistema set valor='false' where clave='permitir_insert_anon';
+- Opcional: push (claves VAPID, ver README 2.5), deploy en Netlify (README 4), instalar PWA en celulares.
+- Aún no se construyó una pantalla de administración (se pidió dejarla para después).

@@ -1,9 +1,9 @@
 // Fuente de datos simulada: misma interfaz que Supabase, para ver la app llena sin backend.
-import type { Atasco, Equipo, Escuchar, Evento, FranjaProyeccion, FuenteDatos, Punto, ResumenVivo, SaludEquipo } from '../datos/tipos'
+import type { Atasco, ConfigEquipo, Equipo, Escuchar, Evento, FranjaProyeccion, FuenteDatos, Punto, ResumenVivo, SaludEquipo } from '../datos/tipos'
 import { DIA, MIN, claveDia, inicioDia, minutoDelDia, sumarDias, truncar, siguiente, type Paso } from '../lib/tiempo'
 import { simularDia } from './simulador'
 
-const EQUIPO: Equipo = { id: 'linea-1', nombre: 'Línea 1', largo_caja_mm: 450 }
+const EQUIPO: Equipo = { id: 'linea-1', nombre: 'Línea 1', largo_caja_mm: 505, vel_cinta_mm_s: 292.3, aprender_vel: true }
 const DIAS_HISTORIA = 45
 const SEMILLA = 20261115
 
@@ -93,7 +93,8 @@ export class FuenteDemo implements FuenteDatos {
     return r
   }
 
-  async equipos() { return [EQUIPO] }
+  async equipos() { return [{ ...EQUIPO }] }
+  async guardarConfigEquipo(_id: string, c: ConfigEquipo) { Object.assign(EQUIPO, c) }
 
   async resumenVivo(_equipoId: string): Promise<ResumenVivo> {
     const ahora = Date.now()
