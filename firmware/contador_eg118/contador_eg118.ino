@@ -27,21 +27,18 @@
 #include <sys/time.h>
 #include "conteo.h"
 
+struct Registro;   // declaración adelantada: Arduino genera los prototipos antes de la definición
+
 // ======================= CONFIGURACIÓN =======================
-const char* WIFI_SSID     = "NOMBRE_DE_LA_RED";        // 2,4 GHz (el hotspot del celular sirve)
-const char* WIFI_PASS     = "CLAVE_DE_LA_RED";
-const char* EQUIPO_ID     = "linea-1";                 // debe existir en la tabla 'equipos'
-
-// Supabase: SOLO la base del proyecto, SIN "/rest/v1/" ni "/functions/v1/".
-// Dejar SUPABASE_URL vacío = solo monitor serie.
-const char* SUPABASE_URL  = "";                        // ej: "https://abcdefgh.supabase.co"
-
-// Token propio del equipo (se genera con:  node scripts/token-equipo.mjs linea-1).
-// Con token se envía a /functions/v1/ingesta. Es secreto: no lo publiques.
-const char* EQUIPO_TOKEN  = "";
-
-// SOLO compatibilidad con la v2: clave anon/publishable. Dejar vacía si se usa EQUIPO_TOKEN.
-const char* SUPABASE_KEY  = "";
+// Las credenciales (WiFi, URL, token) están en secretos.h, que NO se sube a GitHub.
+// Si no existe: copia secretos.example.h como secretos.h y complétalo.
+#include "secretos.h"
+const char* WIFI_SSID     = CFG_WIFI_SSID;
+const char* WIFI_PASS     = CFG_WIFI_PASS;
+const char* EQUIPO_ID     = CFG_EQUIPO_ID;
+const char* SUPABASE_URL  = CFG_SUPABASE_URL;
+const char* EQUIPO_TOKEN  = CFG_EQUIPO_TOKEN;
+const char* SUPABASE_KEY  = CFG_SUPABASE_KEY;
 
 // Entrada del sensor: confirmar con prueba_eg118.ino
 // true  = DI1 vale 1 con el haz CORTADO     false = DI1 vale 0 con el haz CORTADO
@@ -56,8 +53,8 @@ conteo::Config crearConfig() {
   conteo::Config c;
   c.bloqueoMinMs  = 100;    // ignorar bloqueos más cortos
   c.huecoMinMs    = 30;     // hueco mínimo que separa dos cajas
-  c.largoCajaMm   = 450;    // largo de la caja en el sentido de avance
-  c.velInicialMmS = 500;    // velocidad aproximada de la cinta (medirla: se ajusta sola después)
+  c.largoCajaMm   = 235;    // largo de la caja en el sentido de avance
+  c.velInicialMmS = 2000;    // velocidad aproximada de la cinta (medirla: se ajusta sola después)
   c.maxPegadas    = 4;      // más cajas pegadas seguidas = atasco / cinta detenida
   c.usarEncoder   = false;  // true si se instala sensor de movimiento en el rodillo (ver USAR_AI_ENCODER)
   c.mmPorPulso    = 50;
@@ -277,6 +274,18 @@ void setup() {
   xTaskCreatePinnedToCore(tareaConteo, "conteo", 4096, nullptr, 10, nullptr, 1);
 
   WiFi.mode(WIFI_STA); WiFi.setAutoReconnect(true);
+  // Diagnóstico: listar las redes que ve el equipo (solo 2,4 GHz) y si está la configurada
+  Serial.printf("WiFi: buscando redes... (configurada: \"%s\")\n", WIFI_SSID);
+  int nRedes = WiFi.scanNetworks();
+  bool vista = false;
+  for (int i = 0; i < nRedes; i++) {
+    bool es = WiFi.SSID(i) == WIFI_SSID;
+    vista |= es;
+    Serial.printf("  %s \"%s\"  %d dBm  canal %d\n", es ? "->" : "  ", WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.channel(i));
+  }
+  if (nRedes <= 0) Serial.println("  (no se ve ninguna red)");
+  if (!vista) Serial.println("WiFi: la red configurada NO aparece. Revisa el nombre exacto (mayúsculas, tildes, espacios) y que sea 2,4 GHz.");
+  WiFi.scanDelete();
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   configTzTime(TZ_CHILE, "pool.ntp.org", "time.google.com");
   encolarLocal("inicio");
@@ -303,6 +312,17 @@ void loop() {
     avisoWifi = con;
     if (con) Serial.printf("WiFi: conectado %s (%d dBm)\n", WiFi.localIP().toString().c_str(), WiFi.RSSI());
     else Serial.println("WiFi: desconectado, guardando eventos...");
+  }
+  static uint32_t ultimoAvisoWifi = 0;
+  if (!con && millis() - ultimoAvisoWifi >= 10000) {
+    ultimoAvisoWifi = millis();
+    wl_status_t s = WiFi.status();
+    const char* motivo = s == WL_NO_SSID_AVAIL ? "no encuentra la red (nombre o 5 GHz)"
+                       : s == WL_CONNECT_FAILED ? "rechazada (clave incorrecta)"
+                       : s == WL_CONNECTION_LOST ? "conexión perdida"
+                       : s == WL_DISCONNECTED ? "desconectado / intentando"
+                       : s == WL_IDLE_STATUS ? "intentando conectar" : "otro";
+    Serial.printf("WiFi: SIN conexión (estado %d: %s). Eventos pendientes de envío: %d\n", (int)s, motivo, pCant);
   }
 
   // 4) enviar

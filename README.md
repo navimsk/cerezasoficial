@@ -58,7 +58,7 @@ No hace falta Docker: los comandos trabajan directo contra el proyecto en la nub
 ```bash
 npx supabase login
 npx supabase link --project-ref swqtfzxmlrludgkttspl
-npx supabase db push          # aplica supabase/migrations/* en orden
+npx supabase db push --remote # aplica supabase/migrations/* en orden (sin --remote busca Docker local)
 ```
 
 Las migraciones **no borran datos**. La `0001` es el esquema que ya existe (idempotente) y
@@ -111,8 +111,9 @@ token del equipo y `vigilar` con un secreto propio o con el JWT del usuario.
 node scripts/token-equipo.mjs linea-1
 ```
 
-El script entrega el token, que va en `EQUIPO_TOKEN` del `.ino`, y el SQL que guarda solo su
-hash. Los pasos para cargar el firmware están en **`firmware/CAMBIOS_FIRMWARE.md`**. Mientras
+El script entrega el token y el SQL que guarda solo su hash. Las credenciales del equipo
+(WiFi, URL de Supabase y token) van en `firmware/contador_eg118/secretos.h`, que **no se sube a
+GitHub**: copia `secretos.example.h` como `secretos.h` y complétalo. Los pasos para cargar el firmware están en **`firmware/CAMBIOS_FIRMWARE.md`**. Mientras
 el equipo siga con la v2, la inserción con clave anon sigue funcionando. Cuando todos estén
 en v3:
 

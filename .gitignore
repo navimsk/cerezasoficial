@@ -9,3 +9,6 @@ supabase/.branches/
 supabase/functions/.env
 *.log
 .DS_Store
+
+# Credenciales del firmware
+firmware/**/secretos.h
