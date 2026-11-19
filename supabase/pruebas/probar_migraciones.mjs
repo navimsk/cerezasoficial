@@ -219,5 +219,31 @@ ok(tokenOculto, 'token_hash sigue oculto para usuarios')
 const fueraRango = await (async () => { try { await db.query(`update equipos set vel_cinta_mm_s = 5000 where id = 'linea-1'`); return false } catch { return true } })()
 ok(fueraRango, 'velocidad fuera de rango se rechaza')
 
+// ---------- 0008 · sensor tapado al cierre y baliza ----------
+console.log('\nSensor tapado al cierre')
+const cfgB = (await db.query(`select baliza_max_min, hora_cierre from equipos where id = 'linea-1'`)).rows[0]
+ok(cfgB.baliza_max_min === 10 && cfgB.hora_cierre === null, 'baliza 10 min por defecto y sin hora de cierre')
+const sinCierre = await comoRolCommit('service_role', () => db.query(`select * from alertas_pendientes() where tipo = 'sensor_tapado'`))
+ok(sinCierre.rows.length === 0, 'sin hora de cierre no hay aviso de sensor tapado')
+// cierre hace 30 min (hora de Chile) con el atasco de la prueba anterior todavía abierto
+await db.query(`update equipos set hora_cierre = ((now() at time zone 'America/Santiago') - interval '30 min')::time where id = 'linea-1'`)
+const tap1 = await comoRolCommit('service_role', () => db.query(`select * from alertas_pendientes() where tipo = 'sensor_tapado'`))
+ok(tap1.rows.length === 1, `haz cortado después del cierre avisa: "${tap1.rows[0]?.cuerpo}"`)
+await db.query(`insert into notificaciones_despachadas (notificacion_id) select id from notificaciones_enviadas on conflict do nothing`)
+const tap2 = await comoRolCommit('service_role', () => db.query(`select * from alertas_pendientes() where tipo = 'sensor_tapado'`))
+ok(tap2.rows.length === 0, 'el aviso de sensor tapado sale una sola vez por día')
+// cierre hace 3 h: fuera de la ventana de 2 h
+await db.query(`delete from notificaciones_enviadas where tipo = 'sensor_tapado'`)
+await db.query(`update equipos set hora_cierre = ((now() at time zone 'America/Santiago') - interval '3 hours')::time where id = 'linea-1'`)
+const tap3 = await comoRolCommit('service_role', () => db.query(`select * from alertas_pendientes() where tipo = 'sensor_tapado'`))
+ok(tap3.rows.length === 0, 'pasadas 2 h del cierre ya no avisa')
+const versionAntes = (await db.query(`select config_actualizada from equipos where id = 'linea-1'`)).rows[0].config_actualizada
+await db.exec('begin'); await db.exec(`update equipos set baliza_max_min = 0 where id = 'linea-1'`)
+const versionDespues = (await db.query(`select config_actualizada from equipos where id = 'linea-1'`)).rows[0].config_actualizada
+await db.exec('rollback')
+ok(new Date(versionDespues) >= new Date(versionAntes), 'cambiar la baliza actualiza la versión de la configuración')
+const malTipo = await (async () => { try { await db.query(`insert into notificaciones_enviadas (equipo_id, tipo, ref, titulo, cuerpo) values ('linea-1','otro','x','t','c')`); return false } catch { return true } })()
+ok(malTipo, 'tipos de aviso desconocidos se rechazan')
+
 console.log(fallas ? `\n${fallas} PRUEBA(S) FALLARON` : '\nTodas las pruebas pasan.')
 process.exit(fallas ? 1 : 0)

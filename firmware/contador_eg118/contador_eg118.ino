@@ -98,6 +98,10 @@ volatile bool hazActual = false;
 volatile uint8_t relesActual = 0;
 volatile uint32_t do1ApagarEn = 0;
 volatile bool enAtasco = false;
+volatile uint32_t atascoDesdeMs = 0;
+// Minutos máximos con la baliza (DO2) encendida en un atasco; 0 = sin límite.
+// Se cambia desde la app (Equipos → Configuración del conteo).
+volatile uint32_t balizaMaxMs = 10UL * 60 * 1000;
 
 int64_t ahoraEpochMs() {
   struct timeval tv; gettimeofday(&tv, nullptr);
@@ -122,7 +126,7 @@ void alEvento(const conteo::Evento& e, void*) {
   xQueueSend(cola, &r, 0);
 
   if (e.n > 0) do1ApagarEn = millis() + 150;                       // pulso luz piloto
-  if (e.tipo == conteo::EV_ATASCO_INICIO) enAtasco = true;
+  if (e.tipo == conteo::EV_ATASCO_INICIO) { enAtasco = true; atascoDesdeMs = millis(); }
   if (e.tipo == conteo::EV_ATASCO_FIN)    enAtasco = false;
 }
 
@@ -151,17 +155,19 @@ void leerConfigRemota(const String& resp) {
   int c = resp.indexOf("\"config\":{");
   if (c < 0) return;
   String cfg = resp.substring(c, resp.indexOf('}', c) + 1);
-  double version, largo, vel, aprender;
+  double version, largo, vel, aprender, baliza;
   if (!numeroJson(cfg, "version", version) || (int64_t)version == cfgVersion) return;
   if (!numeroJson(cfg, "largo_caja_mm", largo)) largo = 0;
   if (!numeroJson(cfg, "vel_cinta_mm_s", vel)) vel = 0;
   if (!numeroJson(cfg, "aprender_vel", aprender)) aprender = 1;
+  if (numeroJson(cfg, "baliza_max_min", baliza) && baliza >= 0) balizaMaxMs = (uint32_t)(baliza * 60000);
   cfgLargoMm = largo; cfgVelMmS = vel; cfgAprender = aprender != 0;
   cfgPendiente = true;
   cfgVersion = (int64_t)version;
-  Serial.printf("Config desde la app: caja %.0f mm · velocidad %s · aprender %s\n", largo,
+  Serial.printf("Config desde la app: caja %.0f mm · velocidad %s · aprender %s · baliza máx %s\n", largo,
                 vel > 0 ? (String(vel * 60 / 1000, 2) + " m/min").c_str() : "la del equipo",
-                aprender != 0 ? "sí" : "no");
+                aprender != 0 ? "sí" : "no",
+                balizaMaxMs ? (String(balizaMaxMs / 60000) + " min").c_str() : "sin límite");
 }
 
 // ---------- Tarea de conteo: 1 ms ----------
@@ -193,7 +199,8 @@ void tareaConteo(void*) {
 
     uint8_t deseado = 0;
     if ((int32_t)(do1ApagarEn - ahora) > 0) deseado |= (1 << BIT_DO1);
-    if (enAtasco) deseado |= (1 << BIT_DO2);
+    // baliza: encendida durante el atasco, hasta balizaMaxMs (el atasco sigue registrado)
+    if (enAtasco && (balizaMaxMs == 0 || ahora - atascoDesdeMs < balizaMaxMs)) deseado |= (1 << BIT_DO2);
     if (deseado != relesActual) escribirReles(deseado);
 
     if (ahora - ultimoWdt >= 500) { ultimoWdt = ahora; wdt = !wdt; digitalWrite(PIN_WDT, wdt); }

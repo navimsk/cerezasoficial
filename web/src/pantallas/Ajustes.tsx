@@ -24,7 +24,7 @@ const TEXTO_ESTADO: Record<EstadoPush, string> = {
 }
 
 const AVISOS: Array<{ k: keyof Preferencias; titulo: string; detalle: string }> = [
-  { k: 'atasco', titulo: 'Atasco', detalle: 'Cuando el haz queda cortado y el conteo se detiene.' },
+  { k: 'atasco', titulo: 'Atasco', detalle: 'Cuando el haz queda cortado y el conteo se detiene, y si al cierre del turno el sensor sigue tapado.' },
   { k: 'sin_contacto', titulo: 'Equipo sin contacto', detalle: 'Cuando el contador lleva más de 2 minutos sin enviar datos.' },
   { k: 'ritmo', titulo: 'Caída de ritmo', detalle: 'Cuando el ritmo de 15 min baja a menos de la mitad de lo habitual a esa hora.' },
 ]

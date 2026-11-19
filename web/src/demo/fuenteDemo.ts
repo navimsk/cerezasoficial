@@ -3,7 +3,7 @@ import type { Atasco, ConfigEquipo, Equipo, Escuchar, Evento, FranjaProyeccion, 
 import { DIA, MIN, claveDia, inicioDia, minutoDelDia, sumarDias, truncar, siguiente, type Paso } from '../lib/tiempo'
 import { simularDia } from './simulador'
 
-const EQUIPO: Equipo = { id: 'linea-1', nombre: 'Línea 1', largo_caja_mm: 505, vel_cinta_mm_s: 292.3, aprender_vel: true }
+const EQUIPO: Equipo = { id: 'linea-1', nombre: 'Línea 1', largo_caja_mm: 505, vel_cinta_mm_s: 292.3, aprender_vel: true, baliza_max_min: 10, hora_cierre: null }
 const DIAS_HISTORIA = 45
 const SEMILLA = 20261115
 

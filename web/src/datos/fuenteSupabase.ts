@@ -35,9 +35,9 @@ export class FuenteSupabase implements FuenteDatos {
   private sb = supabase()
 
   async equipos(): Promise<Equipo[]> {
-    const { data, error } = await this.sb.from('equipos').select('id, nombre, largo_caja_mm, vel_cinta_mm_s, aprender_vel').eq('activo', true).order('id')
+    const { data, error } = await this.sb.from('equipos').select('id, nombre, largo_caja_mm, vel_cinta_mm_s, aprender_vel, baliza_max_min, hora_cierre').eq('activo', true).order('id')
     if (error) throw new Error(error.message)
-    return (data ?? []).map(e => ({ id: e.id, nombre: e.nombre || e.id, largo_caja_mm: e.largo_caja_mm, vel_cinta_mm_s: e.vel_cinta_mm_s, aprender_vel: e.aprender_vel }))
+    return (data ?? []).map(e => ({ id: e.id, nombre: e.nombre || e.id, largo_caja_mm: e.largo_caja_mm, vel_cinta_mm_s: e.vel_cinta_mm_s, aprender_vel: e.aprender_vel, baliza_max_min: e.baliza_max_min, hora_cierre: e.hora_cierre ? String(e.hora_cierre).slice(0, 5) : null }))
   }
 
   async guardarConfigEquipo(equipoId: string, c: ConfigEquipo): Promise<void> {

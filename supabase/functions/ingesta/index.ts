@@ -48,13 +48,14 @@ Deno.serve(async (req) => {
 
   // Configuración editable desde la app: el equipo la aplica cuando cambia "version".
   const { data: q } = await sb.from('equipos')
-    .select('largo_caja_mm, vel_cinta_mm_s, aprender_vel, config_actualizada')
+    .select('largo_caja_mm, vel_cinta_mm_s, aprender_vel, baliza_max_min, config_actualizada')
     .eq('id', fila?.equipo).maybeSingle()
   const config = q ? {
     version: new Date(q.config_actualizada).getTime(),
     largo_caja_mm: q.largo_caja_mm,
     vel_cinta_mm_s: q.vel_cinta_mm_s ?? 0,       // 0 = sin velocidad fijada: el equipo usa la suya
     aprender_vel: q.aprender_vel,
+    baliza_max_min: q.baliza_max_min,           // 0 = sin límite
   } : undefined
 
   return responder({

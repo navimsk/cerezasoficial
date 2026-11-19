@@ -90,12 +90,17 @@ function ConfigConteo({ equipo, velUsada }: { equipo: Equipo; velUsada: number |
     largo: (equipo.largo_caja_mm / 10).toLocaleString('es-CL', { maximumFractionDigits: 1 }),
     vel: equipo.vel_cinta_mm_s ? mMin(equipo.vel_cinta_mm_s) : '',
     aprender: equipo.aprender_vel ?? true,
+    baliza: String(equipo.baliza_max_min ?? 10),
+    cierre: equipo.hora_cierre ?? '',
   })
   const [f, setF] = useState(inicial)
   const [estado, setEstado] = useState<{ error: boolean; texto: string } | null>(null)
   const [ocupado, setOcupado] = useState(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => setF(inicial()), [equipo.largo_caja_mm, equipo.vel_cinta_mm_s, equipo.aprender_vel])
+  useEffect(() => setF(inicial()), [equipo.largo_caja_mm, equipo.vel_cinta_mm_s, equipo.aprender_vel, equipo.baliza_max_min, equipo.hora_cierre])
+
+  const balizaMin = aNumero(f.baliza)
+  const errBaliza = !(Number.isInteger(balizaMin) && balizaMin >= 0 && balizaMin <= 1440) ? 'Minutos enteros entre 0 y 1440.' : null
 
   const largoCm = aNumero(f.largo)
   const velMin = f.vel.trim() === '' ? null : aNumero(f.vel)
@@ -106,13 +111,15 @@ function ConfigConteo({ equipo, velUsada }: { equipo: Equipo; velUsada: number |
   const cambio = JSON.stringify(f) !== JSON.stringify(inicial())
 
   async function guardar() {
-    if (errLargo || errVel) return
+    if (errLargo || errVel || errBaliza) return
     setOcupado(true); setEstado(null)
     try {
       await fuente.guardarConfigEquipo(equipo.id, {
         largo_caja_mm: Math.round(largoCm * 10),
         vel_cinta_mm_s: velMmS === null ? null : Math.round(velMmS * 10) / 10,
         aprender_vel: f.aprender,
+        baliza_max_min: balizaMin,
+        hora_cierre: f.cierre || null,
       })
       await recargarEquipos()
       setEstado({ error: false, texto: 'Guardado. El equipo lo aplica en su próximo envío (menos de 30 s si está conectado).' })
@@ -148,11 +155,27 @@ function ConfigConteo({ equipo, velUsada }: { equipo: Equipo; velUsada: number |
             <span className="nota nota--tenue">Con cada caja suelta corrige la velocidad (desde la 3.ª). Desactívalo si la velocidad que escribes es exacta.</span>
           </span>
         </label>
+        <label className="campo">
+          <span className="rotulo">Baliza de atasco: máximo (min)</span>
+          <input inputMode="numeric" value={f.baliza} aria-invalid={!!errBaliza} aria-describedby={`baliza-ayuda-${equipo.id}`}
+            onChange={e => setF({ ...f, baliza: e.target.value })} />
+          <span id={`baliza-ayuda-${equipo.id}`} className={`nota${errBaliza ? ' texto-error' : ' nota--tenue'}`}>
+            {errBaliza ?? (balizaMin === 0 ? 'Sin límite: queda encendida mientras dure el atasco.' : 'Después se apaga sola; el atasco sigue registrado en la app.')}
+          </span>
+        </label>
+        <label className="campo">
+          <span className="rotulo">Hora de cierre del turno</span>
+          <input type="time" value={f.cierre} aria-describedby={`cierre-ayuda-${equipo.id}`}
+            onChange={e => setF({ ...f, cierre: e.target.value })} />
+          <span id={`cierre-ayuda-${equipo.id}`} className="nota nota--tenue">
+            {f.cierre ? `Si después de las ${f.cierre} el sensor sigue tapado, llega un aviso (preferencia "Atasco").` : 'Vacío: sin aviso de sensor tapado al cierre.'}
+          </span>
+        </label>
       </fieldset>
       {tapaS !== null && <p className="nota nota--tenue">Con estos valores, cada caja tapa el sensor unos {tapaS.toLocaleString('es-CL', { maximumFractionDigits: 2 })} s.</p>}
       {puede ? (
         <div className="fila-botones">
-          <button type="submit" className="boton boton--primario" disabled={!cambio || !!errLargo || !!errVel || ocupado}>
+          <button type="submit" className="boton boton--primario" disabled={!cambio || !!errLargo || !!errVel || !!errBaliza || ocupado}>
             <Icono nombre="check" tam={18} />{ocupado ? 'Guardando…' : 'Guardar'}
           </button>
           {velUsada && <button type="button" className="boton" disabled={ocupado} onClick={() => setF({ ...f, vel: mMin(velUsada) })}>Usar la que mide el equipo</button>}

@@ -36,9 +36,16 @@ export interface Equipo {
   vel_cinta_mm_s?: number | null
   /** El equipo sigue ajustando la velocidad con las cajas sueltas. */
   aprender_vel?: boolean
+  /** Minutos máximos con la baliza de atasco encendida (0 = sin límite). */
+  baliza_max_min?: number
+  /** Hora habitual de cierre del turno, "HH:MM" (null = sin aviso de sensor tapado). */
+  hora_cierre?: string | null
 }
 
-export interface ConfigEquipo { largo_caja_mm: number; vel_cinta_mm_s: number | null; aprender_vel: boolean }
+export interface ConfigEquipo {
+  largo_caja_mm: number; vel_cinta_mm_s: number | null; aprender_vel: boolean
+  baliza_max_min: number; hora_cierre: string | null
+}
 
 /** Un intervalo agregado (minuto, hora, día…). */
 export interface Punto {
